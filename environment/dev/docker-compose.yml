@@ -1,14 +1,11 @@
 version: "2"
 services:
-  ecs-exporter:
+  awslogs-exporter:
     build:
       context: ../..
       dockerfile: environment/dev/Dockerfile
     volumes:
-      - ../..:/go/src/github.com/slok/ecs-exporter
-      - ~/.gitconfig:/home/exs-exporter/.gitignore:ro
-      - ~/.ssh:/home/ecs-exporter/.ssh:ro
-      - ~/.bash_history.ecs-exporter:/home/ecs-exporter/.bash_history
+      - ../..:/go/src/github.com/houserater/awslogs-exporter
     environment:
       - ENVIRONMENT=local
       - AWS_REGION
@@ -17,6 +14,6 @@ services:
       - AWS_SECRET_ACCESS_KEY
       - AWS_SESSION_TOKEN
 
-    command: "build.sh"
+    command: "bin/awslogs-exporter --aws.region=us-east-1 --aws.log-prefix=/ecs/HR-Prod"
     ports:
       - "9222:9222"

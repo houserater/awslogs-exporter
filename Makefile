@@ -2,10 +2,10 @@
 .PHONY: default deps base build dev shell start stop image push test build_release dep_update dep_install vet test gogen
 
 # Name of this service/application
-SERVICE_NAME := ecs-exporter
+SERVICE_NAME := awslogs-exporter
 
 # Docker image name for this project
-IMAGE_NAME := slok/$(SERVICE_NAME)
+IMAGE_NAME := houserater/$(SERVICE_NAME)
 
 # Get the main unix group for the user running make (to be used by docker-compose later)
 GID := $(shell id -g)

@@ -8,13 +8,13 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/slok/ecs-exporter/collector"
-	"github.com/slok/ecs-exporter/log"
+	"github.com/houserater/awslogs-exporter/collector"
+	"github.com/houserater/awslogs-exporter/log"
 )
 
 // Main is the application entry point
 func Main() int {
-	log.Infof("Starting ECS exporter...")
+	log.Infof("Starting AWS Logs exporter...")
 
 	// Parse command line flags
 	if err := parse(os.Args[1:]); err != nil {
@@ -26,12 +26,8 @@ func Main() int {
 		log.SetLevel(log.DebugLevel)
 	}
 
-	if cfg.disableCIMetrics {
-		log.Warnf("Cluster container instance metrics have been disabled")
-	}
-
 	// Create the exporter and register it
-	exporter, err := collector.New(cfg.awsRegion, cfg.clusterFilter, cfg.disableCIMetrics)
+	exporter, err := collector.New(cfg.awsRegion, cfg.groupFilter, cfg.logHistory)
 	if err != nil {
 		log.Error(err)
 		return 1
@@ -42,9 +38,9 @@ func Main() int {
 	http.Handle(cfg.metricsPath, prometheus.Handler())
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`<html>
-             <head><title>ECS Exporter</title></head>
+             <head><title>AWS Logs Exporter</title></head>
              <body>
-             <h1>ECS Exporter</h1>
+             <h1>AWS Logs Exporter</h1>
              <p><a href='` + cfg.metricsPath + `'>Metrics</a></p>
              </body>
              </html>`))

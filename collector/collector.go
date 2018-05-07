@@ -2,19 +2,18 @@ package collector
 
 import (
 	"context"
-	"regexp"
 	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/version"
 
-	"github.com/slok/ecs-exporter/log"
-	"github.com/slok/ecs-exporter/types"
+	"github.com/houserater/awslogs-exporter/log"
+	"github.com/houserater/awslogs-exporter/types"
 )
 
 const (
-	namespace = "ecs"
+	namespace = "awslogs"
 	timeout   = 10 * time.Second
 )
 
@@ -23,86 +22,41 @@ var (
 	// exporter metrics
 	up = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "up"),
-		"Was the last query of ecs successful.",
+		"Was the last query of AWS Logs successful.",
 		[]string{"region"}, nil,
 	)
 
-	// Clusters metrics
-	clusterCount = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "clusters"),
-		"The total number of clusters",
+	// Log group metrics
+	logGroupCount = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "logGroupCount"),
+		"The total number of log groups",
 		[]string{"region"}, nil,
 	)
 
-	//  Services metrics
-	serviceCount = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "services"),
-		"The total number of services",
-		[]string{"region", "cluster"}, nil,
+	logMessageCount = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "logMessageCount"),
+		"The total number of log messages within start time",
+		[]string{"region", "group"}, nil,
 	)
 
-	serviceDesired = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "service_desired_tasks"),
-		"The desired number of instantiations of the task definition to keep running regarding a service",
-		[]string{"region", "cluster", "service"}, nil,
-	)
-
-	servicePending = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "service_pending_tasks"),
-		"The number of tasks in the cluster that are in the PENDING state regarding a service",
-		[]string{"region", "cluster", "service"}, nil,
-	)
-
-	serviceRunning = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "service_running_tasks"),
-		"The number of tasks in the cluster that are in the RUNNING state regarding a service",
-		[]string{"region", "cluster", "service"}, nil,
-	)
-
-	//  Container instances metrics
-	cInstanceCount = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "container_instances"),
-		"The total number of container instances",
-		[]string{"region", "cluster"}, nil,
-	)
-
-	cInstanceAgentC = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "container_instance_agent_connected"),
-		"The connected state of the container instance agent",
-		[]string{"region", "cluster", "instance"}, nil,
-	)
-
-	cInstanceStatusAct = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "container_instance_active"),
-		"The status of the container instance in ACTIVE state, indicates that the container instance can accept tasks.",
-		[]string{"region", "cluster", "instance"}, nil,
-	)
-
-	cInstancePending = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "", "container_instance_pending_tasks"),
-		"The number of tasks on the container instance that are in the PENDING status.",
-		[]string{"region", "cluster", "instance"}, nil,
+	logMessage = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "logMessage"),
+		"A log event message",
+		[]string{"region", "group", "message", "date"}, nil,
 	)
 )
 
-// Exporter collects ECS clusters metrics
+// Exporter collects AWS Logs metrics
 type Exporter struct {
-	sync.Mutex                   // Our exporter object will be locakble to protect from concurrent scrapes
-	client        ECSGatherer    // Custom ECS client to get information from the clusters
-	region        string         // The region where the exporter will scrape
-	clusterFilter *regexp.Regexp // Compiled regular expresion to filter clusters
-	noCIMetrics   bool           // Don't gather container instance metrics
-	timeout       time.Duration  // The timeout for the whole gathering process
+	sync.Mutex                    // Our exporter object will be locakble to protect from concurrent scrapes
+	client        AWSLogsGatherer // Custom AWS Logs client to get information from the log groups
+	region        string          // The region where the exporter will scrape
+	timeout       time.Duration   // The timeout for the whole gathering process
 }
 
 // New returns an initialized exporter
-func New(awsRegion string, clusterFilterRegexp string, disableCIMetrics bool) (*Exporter, error) {
-	c, err := NewECSClient(awsRegion)
-	if err != nil {
-		return nil, err
-	}
-
-	cRegexp, err := regexp.Compile(clusterFilterRegexp)
+func New(awsRegion string, logStreamNamePrefix string, logHistory int64) (*Exporter, error) {
+	c, err := NewAWSLogsClient(awsRegion, &logStreamNamePrefix, logHistory)
 	if err != nil {
 		return nil, err
 	}
@@ -111,8 +65,6 @@ func New(awsRegion string, clusterFilterRegexp string, disableCIMetrics bool) (*
 		Mutex:         sync.Mutex{},
 		client:        c,
 		region:        awsRegion,
-		clusterFilter: cRegexp,
-		noCIMetrics:   disableCIMetrics,
 		timeout:       timeout,
 	}, nil
 
@@ -135,28 +87,16 @@ func sendSafeMetric(ctx context.Context, ch chan<- prometheus.Metric, metric pro
 	return nil
 }
 
-// Describe describes all the metrics ever exported by the ECS exporter. It
+// Describe describes all the metrics ever exported by the AWS Logs exporter. It
 // implements prometheus.Collector.
 func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 	ch <- up
-	ch <- clusterCount
-	ch <- serviceCount
-	ch <- serviceCount
-	ch <- serviceDesired
-	ch <- servicePending
-	ch <- serviceRunning
-
-	if e.noCIMetrics {
-		return
-	}
-
-	ch <- cInstanceCount
-	ch <- cInstanceAgentC
-	ch <- cInstanceStatusAct
-	ch <- cInstancePending
+	ch <- logGroupCount
+	ch <- logMessageCount
+	ch <- logMessage
 }
 
-// Collect fetches the stats from configured ECS and delivers them
+// Collect fetches the stats from configured AWS Logs and delivers them
 // as Prometheus metrics. It implements prometheus.Collector
 func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	log.Debugf("Start collecting...")
@@ -166,51 +106,32 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	e.Lock()
 	defer e.Unlock()
 
-	// Get clusters
-	cs, err := e.client.GetClusters()
+	// Get log groups
+	cs, err := e.client.GetLogGroups()
 	if err != nil {
 		sendSafeMetric(ctx, ch, prometheus.MustNewConstMetric(up, prometheus.GaugeValue, 0, e.region))
 		log.Errorf("Error collecting metrics: %v", err)
 		return
 	}
 
-	e.collectClusterMetrics(ctx, ch, cs)
+	e.collectLogGroupMetrics(ctx, ch, cs)
 
 	// Start getting metrics per cluster on its own goroutine
 	errC := make(chan bool)
 	totalCs := 0 // total cluster metrics gorotine ran
 
 	for _, c := range cs {
-		// Filter not desired clusters
-		if !e.validCluster(c) {
-			log.Debugf("Cluster '%s' filtered", c.Name)
-			continue
-		}
 		totalCs++
-		go func(c types.ECSCluster) {
+		go func(c types.AWSLogGroup) {
 			// Get services
-			ss, err := e.client.GetClusterServices(&c)
+			ss, err := e.client.GetLogEvents(&c)
 			if err != nil {
 				errC <- true
-				log.Errorf("Error collecting cluster service metrics: %v", err)
-				return
-			}
-			e.collectClusterServicesMetrics(ctx, ch, &c, ss)
-
-			// Get container instance metrics (if enabled)
-			if e.noCIMetrics {
-				log.Debug("Container instance metrics disabled, no gathering these metrics...")
-				errC <- false
+				log.Errorf("Error collecting log group stream metrics: %v", err)
 				return
 			}
 
-			cs, err := e.client.GetClusterContainerInstances(&c)
-			if err != nil {
-				errC <- true
-				log.Errorf("Error collecting cluster container instance metrics: %v", err)
-				return
-			}
-			e.collectClusterContainerInstancesMetrics(ctx, ch, &c, cs)
+			e.collectLogGroupStreamMetrics(ctx, ch, ss)
 
 			errC <- false
 		}(*c)
@@ -239,57 +160,22 @@ ServiceCollector:
 	)
 }
 
-// validCluster will return true if the cluster is valid for the exporter cluster filtering regexp, otherwise false
-func (e *Exporter) validCluster(cluster *types.ECSCluster) bool {
-	return e.clusterFilter.MatchString(cluster.Name)
+func (e *Exporter) collectLogGroupMetrics(ctx context.Context, ch chan<- prometheus.Metric, groups []*types.AWSLogGroup) {
+	// Total log group count
+	sendSafeMetric(ctx, ch, prometheus.MustNewConstMetric(logGroupCount, prometheus.GaugeValue, float64(len(groups)), e.region))
 }
 
-func (e *Exporter) collectClusterMetrics(ctx context.Context, ch chan<- prometheus.Metric, clusters []*types.ECSCluster) {
-	// Total cluster count
-	sendSafeMetric(ctx, ch, prometheus.MustNewConstMetric(clusterCount, prometheus.GaugeValue, float64(len(clusters)), e.region))
-}
+func (e *Exporter) collectLogGroupStreamMetrics(ctx context.Context, ch chan<- prometheus.Metric, events *types.AWSLogGroupEvents) {
+	sendSafeMetric(ctx, ch, prometheus.MustNewConstMetric(logMessageCount, prometheus.GaugeValue, float64(len(events.Logs)), e.region, events.Group.Name))
 
-func (e *Exporter) collectClusterServicesMetrics(ctx context.Context, ch chan<- prometheus.Metric, cluster *types.ECSCluster, services []*types.ECSService) {
+	for _, event := range events.Logs {
+		log := *event.Message
+		date := time.Unix(0, *event.Timestamp * int64(time.Millisecond)).Format(time.RFC3339)
 
-	// Total services
-	sendSafeMetric(ctx, ch, prometheus.MustNewConstMetric(serviceCount, prometheus.GaugeValue, float64(len(services)), e.region, cluster.Name))
-
-	for _, s := range services {
-		// Desired task count
-		sendSafeMetric(ctx, ch, prometheus.MustNewConstMetric(serviceDesired, prometheus.GaugeValue, float64(s.DesiredT), e.region, cluster.Name, s.Name))
-
-		// Pending task count
-		sendSafeMetric(ctx, ch, prometheus.MustNewConstMetric(servicePending, prometheus.GaugeValue, float64(s.PendingT), e.region, cluster.Name, s.Name))
-
-		// Running task count
-		sendSafeMetric(ctx, ch, prometheus.MustNewConstMetric(serviceRunning, prometheus.GaugeValue, float64(s.RunningT), e.region, cluster.Name, s.Name))
-	}
-}
-
-func (e *Exporter) collectClusterContainerInstancesMetrics(ctx context.Context, ch chan<- prometheus.Metric, cluster *types.ECSCluster, cInstances []*types.ECSContainerInstance) {
-	// Total container instances
-	sendSafeMetric(ctx, ch, prometheus.MustNewConstMetric(cInstanceCount, prometheus.GaugeValue, float64(len(cInstances)), e.region, cluster.Name))
-
-	for _, c := range cInstances {
-		// Agent connected
-		var conn float64
-		if c.AgentConn {
-			conn = 1
-		}
-		sendSafeMetric(ctx, ch, prometheus.MustNewConstMetric(cInstanceAgentC, prometheus.GaugeValue, conn, e.region, cluster.Name, c.InstanceID))
-
-		// Instance status
-		var active float64
-		if c.Active {
-			active = 1
-		}
-		sendSafeMetric(ctx, ch, prometheus.MustNewConstMetric(cInstanceStatusAct, prometheus.GaugeValue, active, e.region, cluster.Name, c.InstanceID))
-
-		// Pending tasks
-		sendSafeMetric(ctx, ch, prometheus.MustNewConstMetric(cInstancePending, prometheus.GaugeValue, float64(c.PendingT), e.region, cluster.Name, c.InstanceID))
+		sendSafeMetric(ctx, ch, prometheus.MustNewConstMetric(logMessage, prometheus.UntypedValue, 1, e.region, events.Group.Name, log, date))
 	}
 }
 
 func init() {
-	prometheus.MustRegister(version.NewCollector("ecs_exporter"))
+	prometheus.MustRegister(version.NewCollector("awslogs_exporter"))
 }

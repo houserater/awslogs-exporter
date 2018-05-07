@@ -4,18 +4,17 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"regexp"
 
-	"github.com/slok/ecs-exporter/log"
+	"github.com/houserater/awslogs-exporter/log"
 )
 
 const (
 	defaultListenAddress    = ":9222"
 	defaultAwsRegion        = ""
 	defaultMetricsPath      = "/metrics"
-	defaultClusterFilter    = ".*"
+	defaultGroupFilter      = ""
+	defaultLogHistory       = 3600
 	defaultDebug            = false
-	defaultDisableCIMetrics = false
 )
 
 // Cfg is the global configuration
@@ -33,9 +32,9 @@ type config struct {
 	listenAddress    string
 	awsRegion        string
 	metricsPath      string
-	clusterFilter    string
+	groupFilter      string
+	logHistory       int64
 	debug            bool
-	disableCIMetrics bool
 }
 
 // init will load all the flags
@@ -56,16 +55,16 @@ func new() *config {
 		&c.awsRegion, "aws.region", defaultAwsRegion, "The AWS region to get metrics from")
 
 	c.fs.StringVar(
-		&c.clusterFilter, "aws.cluster-filter", defaultClusterFilter, "Regex used to filter the cluster names, if doesn't match the cluster is ignored")
+		&c.groupFilter, "aws.log-prefix", defaultGroupFilter, "Name prefix used to filter the log group names")
+
+	c.fs.Int64Var(
+		&c.logHistory, "aws.log-history", defaultLogHistory, "Number of seconds of previous log events to search")
 
 	c.fs.StringVar(
 		&c.metricsPath, "web.telemetry-path", defaultMetricsPath, "The path where metrics will be exposed")
 
 	c.fs.BoolVar(
 		&c.debug, "debug", defaultDebug, "Run exporter in debug mode")
-
-	c.fs.BoolVar(
-		&c.disableCIMetrics, "metrics.disable-cinstances", defaultDisableCIMetrics, "Disable clusters container instances metrics gathering")
 
 	return c
 }
@@ -86,12 +85,8 @@ func (c *config) parse(args []string) error {
 		return fmt.Errorf("An aws region is required")
 	}
 
-	if _, err := regexp.Compile(c.clusterFilter); err != nil {
-		return fmt.Errorf("Invalid cluster filtering regex: %s", c.clusterFilter)
-	}
-
-	if c.clusterFilter != defaultClusterFilter {
-		log.Warnf("Filtering cluster metrics by: %s", c.clusterFilter)
+	if c.groupFilter != defaultGroupFilter {
+		log.Warnf("Filtering cluster metrics by: %s", c.groupFilter)
 	}
 
 	return nil

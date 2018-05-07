@@ -1,15 +1,15 @@
-FROM slok/ecs-exporter_base:latest
+FROM houserater/awslogs-exporter_base:latest
 
 USER root
 
 # Prepare
-WORKDIR /go/src/github.com/slok/ecs-exporter/
+WORKDIR /go/src/github.com/houserater/awslogs-exporter/
 RUN mkdir -p /bin
 COPY . ./
 
 # Build
-RUN ./build.sh /bin/ecs-exporter
-RUN chmod 755 /bin/ecs-exporter
+RUN ./build.sh /bin/awslogs-exporter
+RUN chmod 755 /bin/awslogs-exporter
 
 # Clean up
 WORKDIR /
@@ -18,5 +18,5 @@ RUN rm -rf /go/src/*
 
 EXPOSE 9222
 
-ENTRYPOINT [ "/bin/ecs-exporter" ]
+ENTRYPOINT [ "/bin/awslogs-exporter" ]
 CMD        [ "--help"]
