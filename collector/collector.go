@@ -4,6 +4,10 @@ import (
 	"context"
 	"sync"
 	"time"
+	"bytes"
+	"encoding/json"
+	"text/template"
+	"fmt"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/version"
@@ -42,7 +46,7 @@ var (
 	logMessage = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "logMessage"),
 		"A log event message",
-		[]string{"region", "group", "message", "date"}, nil,
+		[]string{"region", "group", "message", "date", "index"}, nil,
 	)
 )
 
@@ -52,10 +56,11 @@ type Exporter struct {
 	client        AWSLogsGatherer // Custom AWS Logs client to get information from the log groups
 	region        string          // The region where the exporter will scrape
 	timeout       time.Duration   // The timeout for the whole gathering process
+	logJSONFormat string          // Any formatter for JSON parsing of log messages
 }
 
 // New returns an initialized exporter
-func New(awsRegion string, logStreamNamePrefix string, logHistory int64) (*Exporter, error) {
+func New(awsRegion string, logStreamNamePrefix string, logHistory int64, logJSONFormat string) (*Exporter, error) {
 	c, err := NewAWSLogsClient(awsRegion, &logStreamNamePrefix, logHistory)
 	if err != nil {
 		return nil, err
@@ -66,6 +71,7 @@ func New(awsRegion string, logStreamNamePrefix string, logHistory int64) (*Expor
 		client:        c,
 		region:        awsRegion,
 		timeout:       timeout,
+		logJSONFormat: logJSONFormat,
 	}, nil
 
 }
@@ -168,11 +174,24 @@ func (e *Exporter) collectLogGroupMetrics(ctx context.Context, ch chan<- prometh
 func (e *Exporter) collectLogGroupStreamMetrics(ctx context.Context, ch chan<- prometheus.Metric, events *types.AWSLogGroupEvents) {
 	sendSafeMetric(ctx, ch, prometheus.MustNewConstMetric(logMessageCount, prometheus.GaugeValue, float64(len(events.Logs)), e.region, events.Group.Name))
 
-	for _, event := range events.Logs {
+	for i, event := range events.Logs {
 		log := *event.Message
 		date := time.Unix(0, *event.Timestamp * int64(time.Millisecond)).Format(time.RFC3339)
+		logIndex := fmt.Sprintf("HEAD~%d", i)
 
-		sendSafeMetric(ctx, ch, prometheus.MustNewConstMetric(logMessage, prometheus.UntypedValue, 1, e.region, events.Group.Name, log, date))
+		if len(e.logJSONFormat) > 0 {
+			tpl, _ := template.New("").Parse(e.logJSONFormat)
+			var result map[string]interface{}
+			err := json.Unmarshal([]byte(log), &result)
+
+			if err == nil {
+				var rendered bytes.Buffer
+				tpl.Execute(&rendered, result)
+				log = rendered.String()
+			}
+		}
+
+		sendSafeMetric(ctx, ch, prometheus.MustNewConstMetric(logMessage, prometheus.UntypedValue, 1, e.region, events.Group.Name, log, date, logIndex))
 	}
 }
 

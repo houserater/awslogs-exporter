@@ -27,7 +27,7 @@ func Main() int {
 	}
 
 	// Create the exporter and register it
-	exporter, err := collector.New(cfg.awsRegion, cfg.groupFilter, cfg.logHistory)
+	exporter, err := collector.New(cfg.awsRegion, cfg.groupFilter, cfg.logHistory, cfg.logJSONFormat)
 	if err != nil {
 		log.Error(err)
 		return 1

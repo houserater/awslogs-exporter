@@ -1,6 +1,6 @@
-# AWS Logs exporter [![Build Status](https://travis-ci.org/houserater/awslogs-exporter.svg?branch=master)](https://travis-ci.org/houserater/awslogs-exporter)
+# AWS CloudWatch Logs exporter
 
-Export AWS CloudWatch Logs to Prometheus
+Export AWS CloudWatch Logs to Prometheus (as labels and counts)
 
 ```bash
 make
@@ -9,7 +9,7 @@ make
 
 ## Notes:
 
-* This exporter will listen by default on the port `9222`
+* This exporter will listen by default on the port `9223`
 * Requires AWS credentials or permission from an EC2 instance
 * You can use the following IAM policy to grant required permissions:
 
@@ -22,8 +22,7 @@ make
             "Effect": "Allow",
             "Action": [
                 "logs:DescribeLogGroups",
-                "logs:DescribeLogStreams",
-                "logs:GetLogEvents"
+                "logs:FilterLogEvents"
             ],
             "Resource": "*"
         }
@@ -42,9 +41,13 @@ make
 ## Flags
 
 * `aws.region`: The AWS region to get metrics from
-* `aws.group-filter`: Regex used to filter the log group names, if doesn't match the group is ignored (default ".*")
+* `aws.log-prefix`: Filter prefix log group names to search
+* `aws.log-history`: Number of seconds to search for previous log events (default 1-hour)
+  - AWS returns up to 1MB of oldest-to-newest logs, so high history values could drop most recent events
+* `aws.log-json-format`: Converts line-by-line JSON log messages into pretty format
+  - Use [`text/template`](https://golang.org/pkg/text/template/) formatting (i.e. `'{{.name}}: {{.message}}'`). Non-JSON lines will be printed normally.
 * `debug`: Run exporter in debug mode
-* `web.listen-address`: Address to listen on (default ":9222")
+* `web.listen-address`: Address to listen on (default ":9223")
 * `web.telemetry-path`: The path where metrics will be exposed (default "/metrics")
 
 ## Docker
@@ -57,5 +60,5 @@ For example:
 
 ```bash
 docker pull houserater/awslogs-exporter
-docker run -d -p 9222:9222 houserater/awslogs-exporter -aws.region="us-east-1"
+docker run -d -p 9223:9223 houserater/awslogs-exporter -aws.region="us-east-1"
 ```

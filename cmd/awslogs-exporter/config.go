@@ -9,11 +9,12 @@ import (
 )
 
 const (
-	defaultListenAddress    = ":9222"
+	defaultListenAddress    = ":9223"
 	defaultAwsRegion        = ""
 	defaultMetricsPath      = "/metrics"
 	defaultGroupFilter      = ""
 	defaultLogHistory       = 3600
+	defaultLogJSONFormat    = ""
 	defaultDebug            = false
 )
 
@@ -34,6 +35,7 @@ type config struct {
 	metricsPath      string
 	groupFilter      string
 	logHistory       int64
+	logJSONFormat    string
 	debug            bool
 }
 
@@ -59,6 +61,9 @@ func new() *config {
 
 	c.fs.Int64Var(
 		&c.logHistory, "aws.log-history", defaultLogHistory, "Number of seconds of previous log events to search")
+
+	c.fs.StringVar(
+		&c.logJSONFormat, "aws.log-json-format", defaultLogJSONFormat, "Parse log lines as JSON and output in format (i.e. {name}: {message})")
 
 	c.fs.StringVar(
 		&c.metricsPath, "web.telemetry-path", defaultMetricsPath, "The path where metrics will be exposed")

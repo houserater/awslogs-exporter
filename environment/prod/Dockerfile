@@ -16,7 +16,7 @@ WORKDIR /
 RUN rm -rf /go/src/*
 
 
-EXPOSE 9222
+EXPOSE 9223
 
 ENTRYPOINT [ "/bin/awslogs-exporter" ]
 CMD        [ "--help"]
